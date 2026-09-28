@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Role {
+  EMPLOYEE
+  HR
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PartOfDay {
+  MORNING
+  AFTERNOON
+}
+
+enum AuditAction {
+  REQUEST_SUBMITTED
+  REQUEST_APPROVED
+  REQUEST_REJECTED
+  EMPLOYEE_CREATED
+  EMPLOYEE_UPDATED
+  LEAVE_TYPE_CREATED
+  LEAVE_TYPE_UPDATED
+  ENTITLEMENT_UPDATED
+  PASSWORD_CHANGED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(EMPLOYEE)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions      Session[]
+  requests      LeaveRequest[]      @relation("Requester")
+  reviews       LeaveRequest[]      @relation("Reviewer")
+  balances      LeaveBalance[]
+  auditLogs     AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LeaveType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  defaultDays Float
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  requests LeaveRequest[]
+  balances LeaveBalance[]
+
+  @@index([active])
+}
+
+model LeaveBalance {
+  id          String @id @default(cuid())
+  userId      String
+  leaveTypeId String
+  year        Int
+  entitled    Float  @default(0)
+  used        Float  @default(0)
+  pending     Float  @default(0)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([year])
+  @@index([userId, year])
+  @@index([leaveTypeId, year])
+}
+
+model LeaveRequest {
+  id           String        @id @default(cuid())
+  userId       String
+  leaveTypeId  String
+  startDate    DateTime
+  endDate      DateTime
+  days         Float
+  isHalfDay    Boolean       @default(false)
+  partOfDay    PartOfDay?
+  reason       String?
+  status       RequestStatus @default(PENDING)
+  reviewedById String?
+  reviewNote   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  user       User       @relation("Requester", fields: [userId], references: [id], onDelete: Cascade)
+  leaveType  LeaveType  @relation(fields: [leaveTypeId], references: [id])
+  reviewedBy User?      @relation("Reviewer", fields: [reviewedById], references: [id])
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([userId, startDate])
+  @@index([status, startDate])
+  @@index([leaveTypeId, status])
+}
+
+/// Append-only record of who changed what. The actor name is denormalised so
+/// the trail stays readable even if the user is later removed.
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  actorName  String
+  action     AuditAction
+  entityType String
+  entityId   String?
+  summary    String
+  metadata   String?
+  createdAt  DateTime    @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([action])
+  @@index([entityType, entityId])
+}
